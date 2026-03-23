@@ -91,3 +91,96 @@ contract DopeModa {
         uint64 createdAt;
         uint128 stashWei;
         uint64 power; // training power
+        uint64 wins;
+        uint64 losses;
+        uint64 lastZoneActionAt;
+        bool active;
+    }
+
+    struct Zone {
+        uint64 gangId; // 0 means neutral
+        uint32 level; // affects raid outcomes + claim cost
+        uint64 defense; // grows with level, shrinks on losses
+        uint64 lastClaimAt;
+        bytes32 emblemHash;
+    }
+
+    struct RaidCommit {
+        address raider; // msg.sender at commit time
+        uint64 fromGangId;
+        uint16 fromZone;
+        uint16 toZone;
+        uint8 tactic; // influences payout skew
+        uint64 committedAt;
+        bytes32 sealed; // keccak256 reveal payload hash
+        uint256 potWei;
+        bool revealed;
+        bool settled;
+    }
+
+    // -----------------------------
+    // Events & errors (unique namespace)
+    // -----------------------------
+
+    event DM_GangRegistered(uint64 indexed gangId, address indexed founder, bytes32 handleHash);
+    event DM_StashFunded(uint64 indexed gangId, address indexed founder, uint256 amountWei);
+    event DM_SloganSet(uint64 indexed gangId, bytes32 sloganHash);
+    event DM_TrainingFired(uint64 indexed gangId, uint8 indexed trainingLine, uint256 spentWei, uint64 newPower);
+    event DM_ZoneClaimed(uint64 indexed gangId, uint16 indexed zoneId, uint32 newLevel, uint64 defense);
+
+    event DM_RaidCommitted(uint256 indexed raidId, uint64 indexed fromGangId, uint16 indexed fromZone, uint16 toZone, uint8 tactic, uint256 potWei);
+    event DM_RaidRevealed(uint256 indexed raidId, address indexed raider, bytes32 revealSalt, uint256 rollBps, bool win, uint64 payoutWei);
+    event DM_Withdrawal(uint256 indexed receiptId, address indexed who, uint256 amountWei);
+
+    event DM_PauseSet(bool paused);
+    event DM_Quench(uint256 indexed receiptId, address indexed who, uint256 remainingWei);
+
+    // Treaty + Racket systems
+    event DM_TreatyDeclared(uint64 indexed gangA, uint64 indexed gangB, uint64 indexed untilAt, uint16 trustBps);
+    event DM_TreatyRevoked(uint64 indexed gangA, uint64 indexed gangB);
+    event DM_RacketPurchased(uint64 indexed gangId, uint8 indexed rackTier, uint16 indexed routeNode, uint256 spentWei, uint64 bullets);
+
+    error DM_NotBoss();
+    error DM_NotQuartermaster();
+    error DM_Paused();
+    error DM_Reentrancy();
+
+    error DM_BadValue();
+    error DM_HandleTooLong();
+    error DM_SloganTooLong();
+    error DM_ZeroGangId();
+    error DM_GangInactive();
+    error DM_NotFounder();
+
+    error DM_InvalidZone();
+    error DM_ZoneOwned(uint64 gangId);
+    error DM_ZoneCooldown();
+    error DM_ZoneNeutralOnly();
+    error DM_ZoneAlreadyActive();
+
+    error DM_RaidCooldown();
+    error DM_RaidPotInvalid();
+    error DM_RaidNotFound();
+    error DM_RaidAlreadyRevealed();
+    error DM_RaidAlreadySettled();
+    error DM_RaidRevealTooLate();
+    error DM_RaidCommitMismatch();
+    error DM_RaidCallerMismatch();
+
+    error DM_InvalidTactic();
+    error DM_InsufficientStash();
+    error DM_EmptyWithdrawal();
+
+    // Treaty + Racket systems
+    error DM_TreatyTrustTooLow();
+    error DM_TreatyDurationTooShort();
+    error DM_TreatySelf();
+    error DM_TreatyNotFounder();
+    error DM_TreatyAlreadyActive();
+    error DM_TreatyNotActive();
+
+    error DM_RacketTierTooHigh();
+    error DM_RacketStakeInvalid();
+    error DM_RouteNodeOutOfRange();
+
+    // -----------------------------
