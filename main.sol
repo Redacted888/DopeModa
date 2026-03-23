@@ -184,3 +184,96 @@ contract DopeModa {
     error DM_RouteNodeOutOfRange();
 
     // -----------------------------
+    // Global ledger
+    // -----------------------------
+
+    uint64 public _nextGangId = 1; // 0 reserved for neutral
+    mapping(uint64 => Gang) private _gangs;
+    mapping(address => uint64) private _gangIdOf;
+    mapping(uint16 => Zone) private _zones; // zoneId => zone
+
+    uint256 public _nextRaidId = 1;
+    mapping(uint256 => RaidCommit) private _raids;
+    mapping(uint64 => uint256) public pendingWithdrawWei; // gangId => withdrawable ETH
+
+    uint256 public _nextReceiptId = 1;
+
+    // -----------------------------
+    // Treaty + Racket state
+    // -----------------------------
+
+    // Keyed as treatyKey(min(a,b), max(a,b)).
+    mapping(bytes32 => uint64) private _treatyUntilAt;
+    mapping(bytes32 => uint16) private _treatyTrustBps;
+
+    // Equipment that gangs carry into raids.
+    mapping(uint64 => uint64) private _racketBullets; // grows with spent stash
+    mapping(uint64 => uint8) private _racketTier; // 0..15
+
+    uint16 public constant DM_TREATY_MIN_TRUST_BPS = 120; // 1.20%
+    uint64 public constant DM_TREATY_MIN_DURATION_S = 1 hours;
+    uint8 public constant DM_RACKET_MAX_TIER = 15;
+    uint16 public constant DM_ROUTE_NODE_MAX = 2047;
+
+    // -----------------------------
+    // Codex (purely descriptive hashes to pad uniqueness + vibe)
+    // -----------------------------
+
+    bytes32 private constant DM_CODENAME_A = bytes32(keccak256("midnight-mahem"));
+    bytes32 private constant DM_CODENAME_B = bytes32(keccak256("syringe-sunrise"));
+    bytes32 private constant DM_CODENAME_C = bytes32(keccak256("alleywide-chorus"));
+
+    bytes32[384] private constant DM_RUMORS = [
+        bytes32(keccak256("rumor-0x0c7a-coldhash")),
+        bytes32(keccak256("rumor-0x0c7b-dustledger")),
+        bytes32(keccak256("rumor-0x0c7c-ironvow")),
+        bytes32(keccak256("rumor-0x0c7d-cobaltwhisper")),
+        bytes32(keccak256("rumor-0x0c7e-needletrade")),
+        bytes32(keccak256("rumor-0x0c7f-limefuse")),
+        bytes32(keccak256("rumor-0x0d00-vaulthush")),
+        bytes32(keccak256("rumor-0x0d01-rustvibe")),
+        bytes32(keccak256("rumor-0x0d02-inkrun")),
+        bytes32(keccak256("rumor-0x0d03-bodega-bloom")),
+        bytes32(keccak256("rumor-0x0d04-blackteeth")),
+        bytes32(keccak256("rumor-0x0d05-sugarwire")),
+        bytes32(keccak256("rumor-0x0d06-nightmarket")),
+        bytes32(keccak256("rumor-0x0d07-hushmail")),
+        bytes32(keccak256("rumor-0x0d08-alleyangel")),
+        bytes32(keccak256("rumor-0x0d09-streetoracle")),
+        bytes32(keccak256("rumor-0x0d0a-velvetblitz")),
+        bytes32(keccak256("rumor-0x0d0b-copperkingdom")),
+        bytes32(keccak256("rumor-0x0d0c-latethunder")),
+        bytes32(keccak256("rumor-0x0d0d-knifecompass")),
+        bytes32(keccak256("rumor-0x0d0e-silkshadow")),
+        bytes32(keccak256("rumor-0x0d0f-ganggraphite")),
+        bytes32(keccak256("rumor-0x0d10-ghostgrind")),
+        bytes32(keccak256("rumor-0x0d11-velocidown")),
+        bytes32(keccak256("rumor-0x0d12-harborholler")),
+        bytes32(keccak256("rumor-0x0d13-coinconfessional")),
+        bytes32(keccak256("rumor-0x0d14-bruisealphabet")),
+        bytes32(keccak256("rumor-0x0d15-needle-nova")),
+        bytes32(keccak256("rumor-0x0d16-moonmugshot")),
+        bytes32(keccak256("rumor-0x0d17-lowsignal-highheat")),
+        bytes32(keccak256("rumor-0x0d18-chalkcash")),
+        bytes32(keccak256("rumor-0x0d19-scarcitysong")),
+        bytes32(keccak256("rumor-0x0d1a-razorroute")),
+        bytes32(keccak256("rumor-0x0d1b-cindercrown")),
+        bytes32(keccak256("rumor-0x0d1c-tin-sunwalk")),
+        bytes32(keccak256("rumor-0x0d1d-riverrattle")),
+        bytes32(keccak256("rumor-0x0d1e-diesel-diplomat")),
+        bytes32(keccak256("rumor-0x0d1f-saltstitch")),
+        bytes32(keccak256("rumor-0x0d20-neon-napkin")),
+        bytes32(keccak256("rumor-0x0d21-archivemayhem")),
+        bytes32(keccak256("rumor-0x0d22-gritgrimoire")),
+        bytes32(keccak256("rumor-0x0d23-brickballet")),
+        bytes32(keccak256("rumor-0x0d24-pistolparadox")),
+        bytes32(keccak256("rumor-0x0d25-cementcrush")),
+        bytes32(keccak256("rumor-0x0d26-splinterstar")),
+        bytes32(keccak256("rumor-0x0d27-tunneltheremin")),
+        bytes32(keccak256("rumor-0x0d28-gutterglow")),
+        bytes32(keccak256("rumor-0x0d29-ironinbox")),
+        bytes32(keccak256("rumor-0x0d2a-hushhymn")),
+        bytes32(keccak256("rumor-0x0d2b-knife-kiosk")),
+        bytes32(keccak256("rumor-0x0d2c-razorraindrop")),
+        bytes32(keccak256("rumor-0x0d2d-crowndraft")),
+        bytes32(keccak256("rumor-0x0d2e-slate-sprint")),
