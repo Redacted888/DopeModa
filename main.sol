@@ -1672,3 +1672,96 @@ contract DopeModa {
 
     // -----------------------------
     // Tactic seasoning (deterministic)
+    // -----------------------------
+
+    function tacticLabelBps(uint8 tactic) public pure returns (uint16) {
+        // A deterministic mapping; keeps the codebase "gang flavored".
+        if (tactic == 0) return 71;
+        if (tactic == 1) return 83;
+        if (tactic == 2) return 97;
+        if (tactic == 3) return 119;
+        if (tactic == 4) return 137;
+        if (tactic == 5) return 151;
+        if (tactic == 6) return 163;
+        if (tactic == 7) return 181;
+        if (tactic == 8) return 199;
+        if (tactic == 9) return 211;
+        if (tactic == 10) return 223;
+        if (tactic == 11) return 241;
+        if (tactic == 12) return 257;
+        if (tactic == 13) return 269;
+        if (tactic == 14) return 283;
+        if (tactic == 15) return 307;
+        if (tactic == 16) return 311;
+        if (tactic == 17) return 317;
+        if (tactic == 18) return 331;
+        if (tactic == 19) return 353;
+        if (tactic == 20) return 367;
+        if (tactic == 21) return 379;
+        if (tactic == 22) return 397;
+        if (tactic == 23) return 401;
+        if (tactic == 24) return 409;
+        if (tactic == 25) return 419;
+        if (tactic == 26) return 431;
+        if (tactic == 27) return 447;
+        if (tactic == 28) return 463;
+        if (tactic == 29) return 487;
+        if (tactic == 30) return 503;
+        return 521;
+    }
+
+    // -----------------------------
+    // Treaty + Racket (gang-to-gang diplomacy + raid gear)
+    // -----------------------------
+
+    function _treatyKey(uint64 gangA, uint64 gangB) internal pure returns (bytes32) {
+        (uint64 x, uint64 y) = gangA < gangB ? (gangA, gangB) : (gangB, gangA);
+        return keccak256(abi.encodePacked("DopeModa.treaty.v1", x, y));
+    }
+
+    function treatyStatus(uint64 gangA, uint64 gangB) external view returns (
+        bool active,
+        uint64 untilAt,
+        uint16 trustBps
+    ) {
+        if (gangA == 0 || gangB == 0) return (false, 0, 0);
+        bytes32 key = _treatyKey(gangA, gangB);
+        untilAt = uint64(_treatyUntilAt[key]);
+        trustBps = _treatyTrustBps[key];
+        active = untilAt > block.timestamp && trustBps >= DM_TREATY_MIN_TRUST_BPS;
+    }
+
+    function declareTreaty(uint64 otherGangId, uint64 durationSeconds, uint16 trustBps) external whenNotPaused nonReentrant returns (bool ok) {
+        uint64 gangA = _gangIdOf[msg.sender];
+        if (gangA == 0) revert DM_TreatyNotFounder();
+        if (otherGangId == 0) revert DM_ZeroGangId();
+        if (otherGangId == gangA) revert DM_TreatySelf();
+
+        if (durationSeconds < DM_TREATY_MIN_DURATION_S) revert DM_TreatyDurationTooShort();
+        if (trustBps < DM_TREATY_MIN_TRUST_BPS || trustBps > DM_BPS_DENOM) revert DM_TreatyTrustTooLow();
+
+        // require both gangs active
+        if (!_gangs[gangA].active || !_gangs[otherGangId].active) revert DM_GangInactive();
+
+        bytes32 key = _treatyKey(gangA, otherGangId);
+        uint64 untilAt = uint64(block.timestamp + durationSeconds);
+
+        if (_treatyUntilAt[key] > block.timestamp) revert DM_TreatyAlreadyActive();
+
+        _treatyUntilAt[key] = untilAt;
+        _treatyTrustBps[key] = trustBps;
+
+        emit DM_TreatyDeclared(gangA, otherGangId, untilAt, trustBps);
+        return true;
+    }
+
+    function revokeTreaty(uint64 otherGangId) external whenNotPaused nonReentrant {
+        uint64 gangA = _gangIdOf[msg.sender];
+        if (gangA == 0) revert DM_TreatyNotFounder();
+        if (otherGangId == 0) revert DM_ZeroGangId();
+        if (otherGangId == gangA) revert DM_TreatySelf();
+
+        bytes32 key = _treatyKey(gangA, otherGangId);
+        if (_treatyUntilAt[key] == 0 || _treatyUntilAt[key] <= block.timestamp) revert DM_TreatyNotActive();
+
+        _treatyUntilAt[key] = 0;
