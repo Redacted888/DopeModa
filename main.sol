@@ -1114,3 +1114,96 @@ contract DopeModa {
         bytes32(keccak256("graffiti-0xe9")),
         bytes32(keccak256("graffiti-0xea")),
         bytes32(keccak256("graffiti-0xeb")),
+        bytes32(keccak256("graffiti-0xec")),
+        bytes32(keccak256("graffiti-0xed")),
+        bytes32(keccak256("graffiti-0xee")),
+        bytes32(keccak256("graffiti-0xef")),
+        bytes32(keccak256("graffiti-0xf0")),
+        bytes32(keccak256("graffiti-0xf1")),
+        bytes32(keccak256("graffiti-0xf2")),
+        bytes32(keccak256("graffiti-0xf3")),
+        bytes32(keccak256("graffiti-0xf4")),
+        bytes32(keccak256("graffiti-0xf5")),
+        bytes32(keccak256("graffiti-0xf6")),
+        bytes32(keccak256("graffiti-0xf7")),
+        bytes32(keccak256("graffiti-0xf8")),
+        bytes32(keccak256("graffiti-0xf9")),
+        bytes32(keccak256("graffiti-0xfa")),
+        bytes32(keccak256("graffiti-0xfb")),
+        bytes32(keccak256("graffiti-0xfc")),
+        bytes32(keccak256("graffiti-0xfd")),
+        bytes32(keccak256("graffiti-0xfe")),
+        bytes32(keccak256("graffiti-0xff"))
+    ];
+
+    // -----------------------------
+    // Construction & basic admin
+    // -----------------------------
+
+    constructor() {
+        DM_BOSS = 0xb87159b5811F9078D9C4F26a8fd23FD44a9D656c;
+        DM_QUARTERMASTER = 0x4a393451221005188dcbb3eA0D7Dc8101C3C41f5;
+        DM_BANK = payable(0x2225Faa9887919cFA8aae9f865f2d8bE335a0eE9);
+        DM_SYSTEM_PROXY = 0xB13B580c266f8ddf0CdCf920A35a9B16f065501a;
+        DM_LAUNCH_BLOCK = block.number;
+        _paused = false;
+    }
+
+    receive() external payable {}
+
+    function setPaused(bool paused) external onlyQuartermaster {
+        _paused = paused;
+        emit DM_PauseSet(paused);
+    }
+
+    // -----------------------------
+    // Public metadata views
+    // -----------------------------
+
+    function paused() external view returns (bool) {
+        return _paused;
+    }
+
+    function launchBlock() external view returns (uint256) {
+        return DM_LAUNCH_BLOCK;
+    }
+
+    function boss() external view returns (address) {
+        return DM_BOSS;
+    }
+
+    function rumorAt(uint256 idx) external pure returns (bytes32) {
+        if (idx >= DM_RUMORS.length) return bytes32(0);
+        return DM_RUMORS[idx];
+    }
+
+    // -----------------------------
+    // Gang lifecycle
+    // -----------------------------
+
+    function registerGang(string calldata handle, bytes32 emblemHash) external payable whenNotPaused nonReentrant returns (uint64 gangId) {
+        if (msg.value < DM_REGISTER_MIN_WEI) revert DM_BadValue();
+        if (bytes(handle).length > DM_MAX_HANDLE_BYTES) revert DM_HandleTooLong();
+        if (emblemHash == bytes32(0)) revert DM_BadValue();
+        if (_gangIdOf[msg.sender] != 0) revert DM_ZoneAlreadyActive();
+
+        gangId = _nextGangId;
+        _nextGangId = gangId + 1;
+
+        bytes32 h = keccak256(bytes(handle));
+        bytes32 slogan = bytes32(0);
+
+        Gang storage g = _gangs[gangId];
+        g.founder = msg.sender;
+        g.handleHash = h;
+        g.sloganHash = slogan;
+        g.createdAt = uint64(block.timestamp);
+        g.stashWei = uint128(msg.value);
+        g.power = 10 + uint64((uint256(h) % 31));
+        g.wins = 0;
+        g.losses = 0;
+        g.lastZoneActionAt = 0;
+        g.active = true;
+
+        _gangIdOf[msg.sender] = gangId;
+        emit DM_GangRegistered(gangId, msg.sender, h);
