@@ -1207,3 +1207,96 @@ contract DopeModa {
 
         _gangIdOf[msg.sender] = gangId;
         emit DM_GangRegistered(gangId, msg.sender, h);
+        emit DM_StashFunded(gangId, msg.sender, msg.value);
+
+        // Initialize first neutral-ish zone emblem mapping (cosmetic)
+        emit DM_ZoneClaimed(gangId, 0, 0, 0);
+        return gangId;
+    }
+
+    function getMyGangId() external view returns (uint64) {
+        return _gangIdOf[msg.sender];
+    }
+
+    function getGang(uint64 gangId) external view returns (
+        address founder,
+        bytes32 handleHash,
+        bytes32 sloganHash,
+        uint64 createdAt,
+        uint128 stashWei,
+        uint64 power,
+        uint64 wins,
+        uint64 losses,
+        uint64 lastZoneActionAt,
+        bool active
+    ) {
+        Gang storage g = _gangs[gangId];
+        if (gangId == 0) revert DM_ZeroGangId();
+        return (
+            g.founder,
+            g.handleHash,
+            g.sloganHash,
+            g.createdAt,
+            g.stashWei,
+            g.power,
+            g.wins,
+            g.losses,
+            g.lastZoneActionAt,
+            g.active
+        );
+    }
+
+    function fundStash(uint64 gangId) external payable whenNotPaused nonReentrant {
+        Gang storage g = _gangs[gangId];
+        if (!g.active) revert DM_GangInactive();
+        if (g.founder != msg.sender) revert DM_NotFounder();
+        if (msg.value == 0) revert DM_BadValue();
+
+        g.stashWei = g.stashWei + uint128(msg.value);
+        emit DM_StashFunded(gangId, msg.sender, msg.value);
+    }
+
+    function setSlogan(uint64 gangId, string calldata slogan) external whenNotPaused {
+        Gang storage g = _gangs[gangId];
+        if (!g.active) revert DM_GangInactive();
+        if (g.founder != msg.sender) revert DM_NotFounder();
+        if (bytes(slogan).length > DM_MAX_SLOGAN_BYTES) revert DM_SloganTooLong();
+        g.sloganHash = keccak256(bytes(slogan));
+        emit DM_SloganSet(gangId, g.sloganHash);
+    }
+
+    // -----------------------------
+    // Training
+    // -----------------------------
+
+    // trainingLine is a tiny knob, tactic-flavored
+    function train(uint64 gangId, uint8 trainingLine, uint256 spentWei) external whenNotPaused nonReentrant {
+        Gang storage g = _gangs[gangId];
+        if (!g.active) revert DM_GangInactive();
+        if (g.founder != msg.sender) revert DM_NotFounder();
+        if (spentWei < DM_TRAIN_MIN_WEI) revert DM_BadValue();
+        if (spentWei > g.stashWei) revert DM_InsufficientStash();
+        if (trainingLine >= 32) revert DM_InvalidTactic();
+
+        // Burn from stash, but we don't do ETH transfers; stash is already held by contract.
+        g.stashWei = g.stashWei - uint128(spentWei);
+
+        uint64 bump = trainingPowerBps(trainingLine, g.power, spentWei);
+        g.power = g.power + bump;
+        g.lastZoneActionAt = uint64(block.timestamp);
+
+        emit DM_TrainingFired(gangId, trainingLine, spentWei, g.power);
+    }
+
+    function trainingPowerBps(uint8 trainingLine, uint64 powerBefore, uint256 spentWei) public pure returns (uint64) {
+        // A deterministic, monotonic mapping to avoid randomness.
+        uint256 base = 120 + uint256(trainingLine) * 9;
+        uint256 p = uint256(powerBefore);
+        uint256 spentBps = spentWei / 1e14; // coarse
+
+        uint256 wf = uint256(warflagBps(uint64(powerBefore), uint16(trainingLine), trainingLine));
+        uint256 rune = uint256(codexRune(trainingLine));
+        uint256 total = base + (p % 77) + (spentBps % 250) + wf + (rune % 80);
+        // clamp bump to a safe range
+        uint256 bump = total % 180;
+        if (bump < 8) bump = 8;
