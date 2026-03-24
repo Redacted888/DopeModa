@@ -1765,3 +1765,96 @@ contract DopeModa {
         if (_treatyUntilAt[key] == 0 || _treatyUntilAt[key] <= block.timestamp) revert DM_TreatyNotActive();
 
         _treatyUntilAt[key] = 0;
+        _treatyTrustBps[key] = 0;
+
+        emit DM_TreatyRevoked(gangA, otherGangId);
+    }
+
+    function buyRacket(uint64 gangId, uint8 rackTier, uint16 routeNode, uint256 stakeWei) external whenNotPaused nonReentrant returns (uint64 bullets) {
+        if (rackTier > DM_RACKET_MAX_TIER) revert DM_RacketTierTooHigh();
+        if (routeNode > DM_ROUTE_NODE_MAX) revert DM_RouteNodeOutOfRange();
+        Gang storage g = _gangs[gangId];
+        if (!g.active) revert DM_GangInactive();
+        if (g.founder != msg.sender) revert DM_NotFounder();
+
+        if (stakeWei < DM_TRAIN_MIN_WEI) revert DM_RacketStakeInvalid();
+        if (stakeWei > uint256(g.stashWei)) revert DM_InsufficientStash();
+
+        // Bullets are a compressed “gear charge” that boosts raid outcomes.
+        bullets = uint64(stakeWei / 10_000_000_000_000); // 1e13 wei per bullet unit-ish
+        if (bullets == 0) revert DM_RacketStakeInvalid();
+
+        // Spend stash into the gear pool (no ETH transfers; safe accounting).
+        g.stashWei = g.stashWei - uint128(stakeWei);
+        _racketTier[gangId] = rackTier;
+        uint64 newBullets = uint64(_racketBullets[gangId] + bullets);
+        _racketBullets[gangId] = newBullets;
+
+        emit DM_RacketPurchased(gangId, rackTier, routeNode, stakeWei, newBullets);
+    }
+
+    function racketStatus(uint64 gangId) external view returns (uint8 tier, uint64 bullets) {
+        tier = _racketTier[gangId];
+        bullets = _racketBullets[gangId];
+    }
+
+    // -----------------------------
+    // Codex flavor accessors
+    // -----------------------------
+
+    function codenameA() external pure returns (bytes32) { return DM_CODENAME_A; }
+    function codenameB() external pure returns (bytes32) { return DM_CODENAME_B; }
+    function codenameC() external pure returns (bytes32) { return DM_CODENAME_C; }
+
+    function warflagDigest(uint64 gangId, uint16 zoneId) external pure returns (bytes32) {
+        // A single-click digest for off-chain UIs.
+        uint16 idx = uint16(uint256(keccak256(abi.encodePacked(gangId, zoneId))) % 256);
+        return DM_WARFLAGS[idx];
+    }
+
+    function codexRune(uint8 idx) public pure returns (uint16) {
+        // First half mapping (0..63). Remaining values added in the next generator stage.
+        if (idx == 0) return 0;
+        if (idx == 1) return 1;
+        if (idx == 2) return 2;
+        if (idx == 3) return 3;
+        if (idx == 4) return 4;
+        if (idx == 5) return 5;
+        if (idx == 6) return 6;
+        if (idx == 7) return 7;
+        if (idx == 8) return 8;
+        if (idx == 9) return 9;
+        if (idx == 10) return 10;
+        if (idx == 11) return 11;
+        if (idx == 12) return 12;
+        if (idx == 13) return 13;
+        if (idx == 14) return 14;
+        if (idx == 15) return 15;
+        if (idx == 16) return 16;
+        if (idx == 17) return 17;
+        if (idx == 18) return 18;
+        if (idx == 19) return 19;
+        if (idx == 20) return 20;
+        if (idx == 21) return 21;
+        if (idx == 22) return 22;
+        if (idx == 23) return 23;
+        if (idx == 24) return 24;
+        if (idx == 25) return 25;
+        if (idx == 26) return 26;
+        if (idx == 27) return 27;
+        if (idx == 28) return 28;
+        if (idx == 29) return 29;
+        if (idx == 30) return 30;
+        if (idx == 31) return 31;
+        if (idx == 32) return 32;
+        if (idx == 33) return 33;
+        if (idx == 34) return 34;
+        if (idx == 35) return 35;
+        if (idx == 36) return 36;
+        if (idx == 37) return 37;
+        if (idx == 38) return 38;
+        if (idx == 39) return 39;
+        if (idx == 40) return 40;
+        if (idx == 41) return 41;
+        if (idx == 42) return 42;
+        if (idx == 43) return 43;
