@@ -1393,3 +1393,96 @@ contract DopeModa {
         _nextRaidId = raidId + 1;
 
         RaidCommit storage r = _raids[raidId];
+        r.raider = msg.sender;
+        r.fromGangId = fromGangId;
+        r.fromZone = fromZone;
+        r.toZone = toZone;
+        r.tactic = tactic;
+        r.committedAt = uint64(block.timestamp);
+        r.sealed = sealed;
+        r.potWei = potWei;
+        r.revealed = false;
+        r.settled = false;
+
+        emit DM_RaidCommitted(raidId, fromGangId, fromZone, toZone, tactic, potWei);
+    }
+
+    function computeRevealHash(
+        uint64 fromGangId,
+        uint16 fromZone,
+        uint16 toZone,
+        uint8 tactic,
+        bytes32 revealSalt
+    ) public pure returns (bytes32) {
+        // reveal salt mixes tactical intent and reduces front-run knowledge.
+        return keccak256(abi.encodePacked(address(this), fromGangId, fromZone, toZone, tactic, revealSalt));
+    }
+
+    function revealRaid(uint256 raidId, bytes32 revealSalt) external whenNotPaused nonReentrant {
+        RaidCommit storage r = _raids[raidId];
+        if (r.fromGangId == 0) revert DM_RaidNotFound();
+        if (r.revealed) revert DM_RaidAlreadyRevealed();
+        if (r.settled) revert DM_RaidAlreadySettled();
+        if (r.raider != msg.sender) revert DM_RaidCallerMismatch();
+        if (revealSalt == bytes32(0)) revert DM_BadValue();
+
+        // Ensure reveal is within blockhash window.
+        // Use committedAt block number indirectly by reading the current blockhash availability:
+        // Commit tx block is not stored. To keep it simple and safe, use a deterministic
+        // "lookback window" by requiring the chain to be recent enough.
+        // This prevents old commits from becoming unresolvable.
+        if (block.number <= 2) revert DM_RaidRevealTooLate();
+        if (block.number - DM_LAUNCH_BLOCK > DM_MAX_BLOCKHASH_LOOKBACK + 10_000) revert DM_RaidRevealTooLate();
+
+        bytes32 sealedNow = computeRevealHash(r.fromGangId, r.fromZone, r.toZone, r.tactic, revealSalt);
+        if (sealedNow != r.sealed) revert DM_RaidCommitMismatch();
+
+        r.revealed = true;
+
+        bytes32 prev = blockhash(block.number - 1);
+        uint256 roll = uint256(keccak256(abi.encodePacked(prev, revealSalt, r.tactic, r.toZone, r.fromZone))) % DM_BPS_DENOM;
+
+        bool win = raidWin(r.fromGangId, r.toZone, roll, r.tactic);
+
+        // Determine defender gang (0 means neutral)
+        Zone storage zTo = _zones[r.toZone];
+        uint64 defenderGangId = zTo.gangId;
+
+        uint64 payout = uint64(raidPayoutWei(r.fromGangId, defenderGangId, r.toZone, r.potWei, win, r.tactic, roll));
+
+        // Update stats & zone state (effects only)
+        _settleRaid(r, win, payout);
+
+        emit DM_RaidRevealed(raidId, msg.sender, revealSalt, roll, win, payout);
+    }
+
+    function _settleRaid(RaidCommit storage r, bool win, uint64 payoutWei) internal {
+        Zone storage zTo = _zones[r.toZone];
+
+        uint64 attackerId = r.fromGangId;
+        uint64 defenderId = zTo.gangId;
+
+        if (win) {
+            // attacker claims the zone
+            uint32 newLevel = zTo.level + 1;
+            zTo.gangId = attackerId;
+            zTo.level = newLevel;
+            zTo.defense = uint64(uint256(newLevel) * 105 + (_gangs[attackerId].power % 200));
+            zTo.lastClaimAt = uint64(block.timestamp);
+
+            _gangs[attackerId].wins += 1;
+            _gangs[attackerId].power = uint64(_gangs[attackerId].power + 5 + (r.tactic % 3));
+            _gangs[attackerId].lastZoneActionAt = uint64(block.timestamp);
+
+            if (defenderId != 0) {
+                _gangs[defenderId].losses += 1;
+                // defense tax for losing
+                if (_gangs[defenderId].power > 2) _gangs[defenderId].power -= 2;
+            }
+
+            pendingWithdrawWei[attackerId] = pendingWithdrawWei[attackerId] + payoutWei;
+        } else {
+            // defender holds the line
+            _gangs[attackerId].losses += 1;
+            if (_gangs[attackerId].power > 3) _gangs[attackerId].power -= 3;
+            _gangs[attackerId].lastZoneActionAt = uint64(block.timestamp);
