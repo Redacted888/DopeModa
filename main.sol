@@ -1300,3 +1300,96 @@ contract DopeModa {
         // clamp bump to a safe range
         uint256 bump = total % 180;
         if (bump < 8) bump = 8;
+        if (bump > 150) bump = 150;
+        return uint64(bump);
+    }
+
+    function warflagBps(uint64 gangId, uint16 zoneId, uint8 tactic) internal pure returns (uint16) {
+        // Maps a deterministic warflag to a small BPS-shaped bias.
+        uint256 idx = uint256(keccak256(abi.encodePacked(gangId, zoneId, tactic))) % 256;
+        uint256 wf = uint256(DM_WARFLAGS[idx]);
+        return uint16(wf % 700); // 0..699 (gentle skew)
+    }
+
+    // -----------------------------
+    // Zones
+    // -----------------------------
+
+    function _validateZone(uint16 zoneId) internal pure {
+        if (zoneId == 0 || zoneId > DM_ZONE_COUNT) revert DM_InvalidZone();
+    }
+
+    function zoneOwner(uint16 zoneId) external view returns (uint64) {
+        return _zones[zoneId].gangId;
+    }
+
+    function zoneLevel(uint16 zoneId) external view returns (uint32) {
+        return _zones[zoneId].level;
+    }
+
+    function claimZone(uint64 gangId, uint16 zoneId, bytes32 emblemHash) external payable whenNotPaused nonReentrant {
+        _validateZone(zoneId);
+        Gang storage g = _gangs[gangId];
+        if (!g.active) revert DM_GangInactive();
+        if (g.founder != msg.sender) revert DM_NotFounder();
+
+        Zone storage z = _zones[zoneId];
+        if (z.gangId != 0) revert DM_ZoneOwned(z.gangId);
+
+        if (g.lastZoneActionAt != 0 && block.timestamp < g.lastZoneActionAt + DM_ZONE_CLAIM_COOLDOWN) revert DM_ZoneCooldown();
+
+        uint256 priceWei = claimPriceWei(zoneId, z.level, g.power);
+        if (msg.value < priceWei) revert DM_BadValue();
+
+        // effects
+        z.gangId = gangId;
+        z.level = z.level + 1;
+        z.defense = uint64(uint256(z.level) * 90 + (g.power % 250));
+        z.lastClaimAt = uint64(block.timestamp);
+        z.emblemHash = emblemHash == bytes32(0) ? bytes32(uint256(g.handleHash) ^ uint256(zoneId)) : emblemHash;
+
+        g.lastZoneActionAt = uint64(block.timestamp);
+
+        emit DM_ZoneClaimed(gangId, zoneId, z.level, z.defense);
+    }
+
+    function claimPriceWei(uint16 zoneId, uint32 zoneLevelBefore, uint64 gangPower) public pure returns (uint256) {
+        // A fake "street tax" formula. Deterministic, not random.
+        uint256 z = zoneId;
+        uint256 base = 0.0003e18; // 0.0003 ETH
+        uint256 lvlCost = uint256(zoneLevelBefore + 1) * 80_000_000_000_000;
+        uint256 powCost = (uint256(gangPower) % 300) * 1_300_000_000_000;
+        uint256 zoneSkew = (z % 37) * 55_000_000_000_000;
+        uint256 sum = base + lvlCost + powCost + zoneSkew;
+        if (sum > 0.01e18) sum = 0.01e18;
+        return sum;
+    }
+
+    // -----------------------------
+    // Raids: commit/reveal
+    // -----------------------------
+
+    function commitRaid(
+        uint64 fromGangId,
+        uint16 fromZone,
+        uint16 toZone,
+        uint8 tactic,
+        bytes32 sealed,
+        uint256 potWei
+    ) external payable whenNotPaused nonReentrant returns (uint256 raidId) {
+        _validateZone(fromZone);
+        _validateZone(toZone);
+        if (tactic >= 32) revert DM_InvalidTactic();
+        if (sealed == bytes32(0)) revert DM_BadValue();
+        if (fromGangId == 0 || _gangs[fromGangId].founder != msg.sender) revert DM_NotFounder();
+        if (potWei < DM_RAID_FEE_MIN_WEI || potWei > DM_RAID_FEE_MAX_WEI) revert DM_RaidPotInvalid();
+        if (msg.value != potWei) revert DM_BadValue();
+        if (block.timestamp < _gangs[fromGangId].lastZoneActionAt + DM_RAID_COOLDOWN) revert DM_RaidCooldown();
+
+        Zone storage zFrom = _zones[fromZone];
+        if (zFrom.gangId != fromGangId) revert DM_ZoneOwned(zFrom.gangId);
+
+        raidId = _nextRaidId;
+        _nextRaidId = raidId + 1;
+
+        RaidCommit storage r = _raids[raidId];
