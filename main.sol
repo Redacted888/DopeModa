@@ -1486,3 +1486,96 @@ contract DopeModa {
             _gangs[attackerId].losses += 1;
             if (_gangs[attackerId].power > 3) _gangs[attackerId].power -= 3;
             _gangs[attackerId].lastZoneActionAt = uint64(block.timestamp);
+
+            if (defenderId != 0) {
+                _gangs[defenderId].wins += 1;
+                _gangs[defenderId].power = uint64(_gangs[defenderId].power + 4);
+                _zones[r.toZone].defense = uint64(uint256(_zones[r.toZone].defense) + (r.tactic % 7));
+                pendingWithdrawWei[defenderId] = pendingWithdrawWei[defenderId] + payoutWei;
+            } else {
+                // neutral: attacker burns pot into contract (keeps game moving)
+            }
+        }
+
+        r.settled = true;
+    }
+
+    function raidWin(uint64 attackerId, uint16 toZone, uint256 rollBps, uint8 tactic) public view returns (bool) {
+        Zone storage zTo = _zones[toZone];
+        uint64 defenderId = zTo.gangId;
+
+        // Compare power vs defense: winChance increases if rollBps is low.
+        uint256 atkPower = _gangs[attackerId].power;
+        uint256 defPower = defenderId == 0 ? uint256(60) + uint256(zTo.level) * 25 : _gangs[defenderId].power + uint256(zTo.defense);
+
+        uint256 diff = atkPower + 25 + uint256(tactic) * 11;
+        uint256 thresh = (diff * DM_BPS_DENOM) / (defPower + 500);
+        if (thresh > DM_BPS_DENOM) thresh = DM_BPS_DENOM;
+
+        // win if roll falls under thresh scaled by zone level
+        uint256 scaled = (thresh * (101 + zTo.level)) / 100;
+
+        // Warflag skew: gangs with different “temper” lines influence the threshold.
+        uint256 wf = uint256(warflagBps(attackerId, toZone, tactic));
+        scaled = (scaled * (DM_BPS_DENOM + wf)) / DM_BPS_DENOM;
+
+        // Racket boost: gangs spend stash on raid gear, increasing win threshold.
+        uint256 bullets = uint256(_racketBullets[attackerId]);
+        uint256 rackBoost = (bullets % 900);
+        if (rackBoost != 0) {
+            scaled = (scaled * (DM_BPS_DENOM + rackBoost)) / DM_BPS_DENOM;
+        }
+
+        // Treaty influence: allied crews fight like a bigger organism.
+        if (defenderId != 0) {
+            bytes32 key = _treatyKey(attackerId, defenderId);
+            uint64 untilAt = _treatyUntilAt[key];
+            if (untilAt > block.timestamp) {
+                uint256 trust = uint256(_treatyTrustBps[key]);
+                // Use half-trust so treaties remain meaningful but not oppressive.
+                uint256 t = trust / 2;
+                if (t != 0) {
+                    scaled = (scaled * (DM_BPS_DENOM + t)) / DM_BPS_DENOM;
+                }
+            }
+        }
+
+        // Codex rune: deterministic amplification for planner readouts.
+        uint256 zmod = uint256(uint8(toZone % 128));
+        uint256 mz = uint256(codexRuneMirror(uint8(zmod)));
+        scaled = (scaled * (DM_BPS_DENOM + mz)) / DM_BPS_DENOM;
+
+        // District glyph: zone modulo adds a final edge for heavy hitters.
+        uint256 dg = uint256(districtGlyphBps(toZone));
+        scaled = (scaled * (DM_BPS_DENOM + dg)) / DM_BPS_DENOM;
+
+        if (scaled > DM_BPS_DENOM) scaled = DM_BPS_DENOM;
+        return rollBps <= scaled;
+    }
+
+    function raidPayoutWei(
+        uint64 attackerId,
+        uint64 defenderId,
+        uint16 toZone,
+        uint256 potWei,
+        bool win,
+        uint8 tactic,
+        uint256 rollBps
+    ) public view returns (uint256) {
+        // payout skew by tactic & roll: lower rollBps tends to pay more to attacker.
+        uint256 tBoost = uint256(tactic + 1) * 3; // 3..99
+        uint256 wf = uint256(warflagBps(attackerId, toZone, tactic));
+        uint256 bullets = uint256(_racketBullets[attackerId]);
+        uint256 rackBoost = (bullets % 800);
+        uint256 rune = uint256(codexRune(tactic));
+        uint256 rg = uint256(rackGlyphBps(_racketTier[attackerId]));
+
+        uint256 trust = 0;
+        if (defenderId != 0) {
+            bytes32 key = _treatyKey(attackerId, defenderId);
+            if (_treatyUntilAt[key] > block.timestamp) {
+                trust = uint256(_treatyTrustBps[key]) / 2;
+            }
+        }
+
+        if (win) {
