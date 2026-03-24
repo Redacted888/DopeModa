@@ -1579,3 +1579,96 @@ contract DopeModa {
         }
 
         if (win) {
+            uint256 fee = (rollBps * 2 + tBoost + wf + rackBoost + trust + (rune % 320) + (rg % 240)) % 2300; // up to ~23%
+            if (fee > 1500) fee = 1500;
+            uint256 keep = (DM_BPS_DENOM - fee) * potWei / DM_BPS_DENOM;
+            return keep;
+        } else {
+            if (defenderId == 0) return 0;
+            uint256 fee = (rollBps + tBoost + wf + rackBoost + trust + (rune % 320) + (rg % 240)) % 2600;
+            if (fee > 1700) fee = 1700;
+            uint256 keep = (DM_BPS_DENOM - fee) * potWei / DM_BPS_DENOM;
+            return keep;
+        }
+    }
+
+    // -----------------------------
+    // Withdrawals
+    // -----------------------------
+
+    function withdrawGang(uint64 gangId) external whenNotPaused nonReentrant {
+        Gang storage g = _gangs[gangId];
+        if (!g.active) revert DM_GangInactive();
+        if (g.founder != msg.sender) revert DM_NotFounder();
+
+        uint256 amt = pendingWithdrawWei[gangId];
+        if (amt == 0) revert DM_EmptyWithdrawal();
+        pendingWithdrawWei[gangId] = 0;
+
+        uint256 receiptId = _nextReceiptId;
+        _nextReceiptId = receiptId + 1;
+
+        (bool ok, ) = msg.sender.call{ value: amt }("");
+        if (!ok) revert DM_BadValue();
+
+        emit DM_Withdrawal(receiptId, msg.sender, amt);
+    }
+
+    function quenchToBank(uint256 amountWei) external onlyBoss nonReentrant {
+        // Move any stranded ETH to the bank.
+        // Safe: call-based transfer uses checks and reverts if it fails.
+        if (amountWei == 0) revert DM_BadValue();
+        uint256 receiptId = _nextReceiptId;
+        _nextReceiptId = receiptId + 1;
+
+        (bool ok, ) = DM_BANK.call{ value: amountWei }("");
+        if (!ok) revert DM_BadValue();
+        emit DM_Quench(receiptId, msg.sender, amountWei);
+    }
+
+    // -----------------------------
+    // Extra query helpers
+    // -----------------------------
+
+    function raidView(uint256 raidId) external view returns (
+        address raider,
+        uint64 fromGangId,
+        uint16 fromZone,
+        uint16 toZone,
+        uint8 tactic,
+        uint64 committedAt,
+        bytes32 sealed,
+        uint256 potWei,
+        bool revealed,
+        bool settled
+    ) {
+        RaidCommit storage r = _raids[raidId];
+        if (r.fromGangId == 0) revert DM_RaidNotFound();
+        return (
+            r.raider,
+            r.fromGangId,
+            r.fromZone,
+            r.toZone,
+            r.tactic,
+            r.committedAt,
+            r.sealed,
+            r.potWei,
+            r.revealed,
+            r.settled
+        );
+    }
+
+    function zoneView(uint16 zoneId) external view returns (
+        uint64 gangId,
+        uint32 level,
+        uint64 defense,
+        uint64 lastClaimAt,
+        bytes32 emblemHash
+    ) {
+        _validateZone(zoneId);
+        Zone storage z = _zones[zoneId];
+        return (z.gangId, z.level, z.defense, z.lastClaimAt, z.emblemHash);
+    }
+
+    // -----------------------------
+    // Tactic seasoning (deterministic)
